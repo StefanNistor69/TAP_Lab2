@@ -12,9 +12,13 @@ import main.api.PredictionResult;
 import main.circuit.CircuitBreaker;
 import main.metrics.LatencyMetrics;
 import main.routing.RoutingStrategy;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeoutException;
 
 public class Router {
 	private final Map<String, ModelHandler> nameToModel = new HashMap<>();
+	private final Map<String, Bulkhead> nameToBulkhead = new HashMap<>();
 	private final LatencyMetrics metrics;
 	private final RoutingStrategy routingStrategy;
 	private final CircuitBreaker circuitBreaker;
@@ -25,8 +29,9 @@ public class Router {
         this.circuitBreaker = circuitBreaker;
 	}
 
-	public void register(String modelName, ModelHandler handler) {
+	public void register(String modelName, ModelHandler handler, Bulkhead bulkhead) {
 		nameToModel.put(modelName, handler);
+		nameToBulkhead.put(modelName, bulkhead);
 	}
 
 	public Map<String, ModelHandler> getRegistrySnapshot() {
@@ -55,9 +60,58 @@ public class Router {
 			target = candidates.get(0);
 		}
 		ModelHandler handler = nameToModel.get(target);
+		Bulkhead bulkhead = nameToBulkhead.get(target);
 
 		long start = System.currentTimeMillis();
-		PredictionResult result = handler.predict(request);
+		PredictionResult result;
+		try {
+			result = bulkhead.call(() -> handler.predict(request), request.getPriority());
+		} catch (TimeoutException te) {
+			long latency = System.currentTimeMillis() - start;
+			metrics.record(target, latency);
+			circuitBreaker.onFailure(target);
+			return new PredictionResult.Builder()
+				.modelName(target)
+				.success(false)
+				.message("bulkhead timeout")
+				.value(Double.NaN)
+				.latencyMillis(latency)
+				.build();
+		} catch (RejectedExecutionException ree) {
+			long latency = System.currentTimeMillis() - start;
+			metrics.record(target, latency);
+			circuitBreaker.onFailure(target);
+			return new PredictionResult.Builder()
+				.modelName(target)
+				.success(false)
+				.message("bulkhead saturated")
+				.value(Double.NaN)
+				.latencyMillis(latency)
+				.build();
+		} catch (ExecutionException ee) {
+			long latency = System.currentTimeMillis() - start;
+			metrics.record(target, latency);
+			circuitBreaker.onFailure(target);
+			return new PredictionResult.Builder()
+				.modelName(target)
+				.success(false)
+				.message("execution error: " + ee.getCause().getMessage())
+				.value(Double.NaN)
+				.latencyMillis(latency)
+				.build();
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			long latency = System.currentTimeMillis() - start;
+			metrics.record(target, latency);
+			circuitBreaker.onFailure(target);
+			return new PredictionResult.Builder()
+				.modelName(target)
+				.success(false)
+				.message("interrupted")
+				.value(Double.NaN)
+				.latencyMillis(latency)
+				.build();
+		}
 		long latency = System.currentTimeMillis() - start;
 		metrics.record(target, latency);
 

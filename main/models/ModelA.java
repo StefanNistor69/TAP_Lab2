@@ -21,7 +21,7 @@ public class ModelA implements ModelHandler {
 			// Simulate compute time: 40-80ms
 			Thread.sleep(40 + random.nextInt(41));
 			// 10% failure rate
-			if (random.nextDouble() < 0.10) {
+			if (random.nextDouble() < 0.50) {
 				throw new RuntimeException("Transient error in ModelA");
 			}
 			value = random.nextDouble();

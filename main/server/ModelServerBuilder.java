@@ -47,7 +47,15 @@ public class ModelServerBuilder {
 		);
 		Router router = new Router(metrics, routingStrategy, cb);
 		for (Map.Entry<String, ModelHandler> entry : models.entrySet()) {
-			router.register(entry.getKey(), entry.getValue());
+			String name = entry.getKey();
+			ModelHandler handler = entry.getValue();
+			Bulkhead bulkhead = new Bulkhead(
+				name,
+				config.getBulkheadThreadsPerModel(),
+				config.getBulkheadQueueCapacityPerModel(),
+				config.getBulkheadTimeoutMillis()
+			);
+			router.register(name, handler, bulkhead);
 		}
 		return new AdaptiveModelServer(router);
 	}

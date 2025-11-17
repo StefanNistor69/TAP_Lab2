@@ -6,6 +6,7 @@ import main.models.ModelA;
 import main.models.ModelB;
 import main.server.AdaptiveModelServer;
 import main.server.ModelServerBuilder;
+import main.server.HttpApiServer;
 
 public class main {
 	public static void main(String[] args) throws Exception {
@@ -14,17 +15,10 @@ public class main {
 			.addAnnotatedModel(new ModelB())
 			.build();
 
-		for (int i = 1; i <= 50; i++) {
-			PredictionRequest req = new PredictionRequest("req-" + i, "payload-" + i);
-			PredictionResult res = server.predict(req);
-			System.out.println(
-				"#" + i + " -> model=" + res.getModelName()
-				+ " success=" + res.isSuccess()
-				+ " latencyMs=" + res.getLatencyMillis()
-				+ " value=" + res.getValue()
-				+ " msg=" + res.getMessage()
-			);
-			Thread.sleep(50);
-		}
+		HttpApiServer http = new HttpApiServer(server);
+		http.start(8080);
+		System.out.println("POST /predict?priority=0 with raw body as payload, or use ?payload=...&id=...");
+		// Keep process alive
+		Thread.currentThread().join();
 	}
 }
